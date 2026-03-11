@@ -14,6 +14,21 @@ export interface Message {
   timestamp: number
 }
 
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+
+export interface UpdateInfo {
+  version: string
+  releaseDate?: string
+  releaseNotes?: string
+}
+
+export interface DownloadProgress {
+  percent: number
+  bytesPerSecond: number
+  total: number
+  transferred: number
+}
+
 export interface ElectronAPI {
   getWindowStatus: () => Promise<{ main: boolean; chatGPT: boolean; gemini: boolean }>
   getBotStatus: () => Promise<{ chatGPT: boolean; gemini: boolean }>
@@ -28,6 +43,16 @@ export interface ElectronAPI {
   onMessageHistory: (callback: (messages: Message[]) => void) => () => void
   onChatStats: (callback: (stats: ChatStats) => void) => () => void
   platform: string
+  // Auto-updater
+  getCurrentVersion: () => Promise<string>
+  checkForUpdates: () => Promise<{ success: boolean; updateAvailable?: boolean; version?: string; error?: string }>
+  downloadUpdate: () => Promise<{ success: boolean; error?: string }>
+  installUpdate: () => void
+  onUpdateAvailable: (callback: (info: UpdateInfo) => void) => () => void
+  onUpdateNotAvailable: (callback: () => void) => () => void
+  onUpdateDownloadProgress: (callback: (progress: DownloadProgress) => void) => () => void
+  onUpdateDownloaded: (callback: () => void) => () => void
+  onUpdateError: (callback: (error: string) => void) => () => void
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -58,6 +83,36 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('chat-stats', handler)
   },
   platform: process.platform,
+  // Auto-updater
+  getCurrentVersion: () => ipcRenderer.invoke('get-current-version'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  onUpdateAvailable: (callback: (info: UpdateInfo) => void) => {
+    const handler = (_: any, info: UpdateInfo) => callback(info)
+    ipcRenderer.on('update-available', handler)
+    return () => ipcRenderer.removeListener('update-available', handler)
+  },
+  onUpdateDownloadProgress: (callback: (progress: DownloadProgress) => void) => {
+    const handler = (_: any, progress: DownloadProgress) => callback(progress)
+    ipcRenderer.on('update-download-progress', handler)
+    return () => ipcRenderer.removeListener('update-download-progress', handler)
+  },
+  onUpdateNotAvailable: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('update-not-available', handler)
+    return () => ipcRenderer.removeListener('update-not-available', handler)
+  },
+  onUpdateDownloaded: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('update-downloaded', handler)
+    return () => ipcRenderer.removeListener('update-downloaded', handler)
+  },
+  onUpdateError: (callback: (error: string) => void) => {
+    const handler = (_: any, error: string) => callback(error)
+    ipcRenderer.on('update-error', handler)
+    return () => ipcRenderer.removeListener('update-error', handler)
+  },
 } as ElectronAPI)
 
 declare global {

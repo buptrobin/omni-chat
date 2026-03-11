@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import StatusBar from './components/StatusBar'
 import ChatWindow from './components/ChatWindow'
 import { Message, ChatStats } from './types'
+import type { UpdateStatus, UpdateInfo, DownloadProgress } from '../../preload/index'
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([])
@@ -24,19 +25,27 @@ const App: React.FC = () => {
   const [isSending, setIsSending] = useState(false)
   const [target, setTarget] = useState<'all' | 'chatgpt' | 'gemini'>('all')
 
+  // Auto-updater state
+  const [currentVersion, setCurrentVersion] = useState<string>('')
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
+
   useEffect(() => {
     const init = async () => {
       try {
-        const [status, bots, history, chatStats] = await Promise.all([
+        const [status, bots, history, chatStats, version] = await Promise.all([
           window.electronAPI.getWindowStatus(),
           window.electronAPI.getBotStatus(),
           window.electronAPI.getMessageHistory(),
           window.electronAPI.getChatStats(),
+          window.electronAPI.getCurrentVersion(),
         ])
         setWindowStatus(status)
         setBotStatus(bots)
         setMessages(history)
         setStats(chatStats)
+        setCurrentVersion(version)
       } catch (error) {
         console.error('[App] Init failed:', error)
       }
@@ -68,11 +77,54 @@ const App: React.FC = () => {
       setStats(newStats)
     })
 
+    // Auto-updater event listeners
+    const unsubscribeUpdateAvailable = window.electronAPI.onUpdateAvailable((info: UpdateInfo) => {
+      console.log('[App] Update available:', info)
+      setUpdateStatus('available')
+      setUpdateInfo(info)
+      setDownloadProgress(null)
+    })
+
+    const unsubscribeUpdateNotAvailable = window.electronAPI.onUpdateNotAvailable(() => {
+      console.log('[App] No update available')
+      setUpdateStatus('idle')
+      setUpdateInfo(null)
+    })
+
+    const unsubscribeDownloadProgress = window.electronAPI.onUpdateDownloadProgress((progress: DownloadProgress) => {
+      setUpdateStatus('downloading')
+      setDownloadProgress(progress)
+    })
+
+    const unsubscribeUpdateDownloaded = window.electronAPI.onUpdateDownloaded(() => {
+      console.log('[App] Update downloaded')
+      setUpdateStatus('downloaded')
+      setDownloadProgress(null)
+    })
+
+    const unsubscribeUpdateError = window.electronAPI.onUpdateError((error: string) => {
+      console.error('[App] Update error:', error)
+      setUpdateStatus('error')
+    })
+
+    // Optional: Auto-check for updates after 5 seconds
+    const autoCheckTimeout = setTimeout(() => {
+      if (updateStatus === 'idle') {
+        handleCheckUpdate()
+      }
+    }, 5000)
+
     return () => {
       clearInterval(statusInterval)
+      clearTimeout(autoCheckTimeout)
       unsubscribeNewMessage()
       unsubscribeHistory()
       unsubscribeStats()
+      unsubscribeUpdateAvailable()
+      unsubscribeUpdateNotAvailable()
+      unsubscribeDownloadProgress()
+      unsubscribeUpdateDownloaded()
+      unsubscribeUpdateError()
     }
   }, [])
 
@@ -115,6 +167,45 @@ const App: React.FC = () => {
     setStats({ totalMessages: 0, humanMessages: 0, chatGPTMessages: 0, geminiMessages: 0 })
   }
 
+  // Auto-updater handlers
+  const handleCheckUpdate = async () => {
+    if (updateStatus === 'checking' || updateStatus === 'downloading') return
+    setUpdateStatus('checking')
+    try {
+      const result = await window.electronAPI.checkForUpdates()
+      if (!result.success) {
+        setUpdateStatus('error')
+        console.error('[App] Check update failed:', result.error)
+      } else if (!result.updateAvailable) {
+        setUpdateStatus('idle')
+        console.log('[App] No update available')
+      }
+    } catch (error) {
+      setUpdateStatus('error')
+      console.error('[App] Check update error:', error)
+    }
+  }
+
+  const handleDownloadUpdate = async () => {
+    if (updateStatus !== 'available') return
+    setUpdateStatus('downloading')
+    try {
+      const result = await window.electronAPI.downloadUpdate()
+      if (!result.success) {
+        setUpdateStatus('error')
+        console.error('[App] Download update failed:', result.error)
+      }
+    } catch (error) {
+      setUpdateStatus('error')
+      console.error('[App] Download update error:', error)
+    }
+  }
+
+  const handleInstallUpdate = () => {
+    if (updateStatus !== 'downloaded') return
+    window.electronAPI.installUpdate()
+  }
+
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <StatusBar
@@ -124,6 +215,13 @@ const App: React.FC = () => {
         onToggleVisibility={toggleWindowVisibility}
         onReload={reloadWindow}
         onClearHistory={clearHistory}
+        currentVersion={currentVersion}
+        updateStatus={updateStatus}
+        updateInfo={updateInfo}
+        downloadProgress={downloadProgress}
+        onCheckUpdate={handleCheckUpdate}
+        onDownloadUpdate={handleDownloadUpdate}
+        onInstallUpdate={handleInstallUpdate}
       />
       <div className="flex-1 overflow-hidden">
         <ChatWindow messages={messages} />

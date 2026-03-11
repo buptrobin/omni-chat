@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { ChatGPTBot } from './chatgpt-bot'
 import { GeminiBot } from './gemini-bot'
 import { ChatRouter } from './chat-router'
+import { UpdateChecker } from './update-checker'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -14,6 +15,7 @@ let geminiWindow: BrowserWindow | null = null
 let chatGPTBot: ChatGPTBot | null = null
 let geminiBot: GeminiBot | null = null
 let chatRouter: ChatRouter | null = null
+let updateChecker: UpdateChecker | null = null
 
 export interface Message {
   id: string
@@ -132,6 +134,42 @@ function notifyRenderer(channel: string, data: any): void {
   if (mainWindow?.webContents) mainWindow.webContents.send(channel, data)
 }
 
+function setupUpdateChecker(): void {
+  if (!mainWindow) return
+
+  updateChecker = new UpdateChecker()
+
+  // 转发更新事件到渲染进程
+  updateChecker.on('update-available', (info) => {
+    notifyRenderer('update-available', {
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseNotes: info.releaseNotes
+    })
+  })
+
+  updateChecker.on('update-not-available', () => {
+    notifyRenderer('update-not-available', null)
+  })
+
+  updateChecker.on('download-progress', (progress) => {
+    notifyRenderer('download-progress', {
+      bytesPerSecond: progress.bytesPerSecond,
+      percent: progress.percent,
+      transferred: progress.transferred,
+      total: progress.total
+    })
+  })
+
+  updateChecker.on('update-downloaded', () => {
+    notifyRenderer('update-downloaded', null)
+  })
+
+  updateChecker.on('error', (error) => {
+    notifyRenderer('update-error', error.message)
+  })
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('get-window-status', () => ({
     main: !!mainWindow, chatGPT: !!chatGPTWindow, gemini: !!geminiWindow
@@ -175,6 +213,63 @@ function registerIpcHandlers(): void {
     notifyRenderer('chat-stats', { totalMessages: 0, humanMessages: 0, chatGPTMessages: 0, geminiMessages: 0 })
     return { success: true }
   })
+
+  // 更新相关 IPC handlers
+  ipcMain.handle('get-current-version', () => {
+    return updateChecker?.getCurrentVersion() ?? app.getVersion()
+  })
+
+  ipcMain.handle('check-for-updates', async () => {
+    if (!updateChecker) {
+      return { success: false, updateAvailable: false, error: 'Update checker not initialized' }
+    }
+    try {
+      const updateInfo = await updateChecker.checkForUpdates()
+      return {
+        success: true,
+        updateAvailable: !!updateInfo,
+        version: updateInfo?.version,
+        error: updateInfo ? undefined : 'No update available'
+      }
+    } catch (error) {
+      return {
+        success: false,
+        updateAvailable: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  ipcMain.handle('download-update', async () => {
+    if (!updateChecker) {
+      return { success: false, error: 'Update checker not initialized' }
+    }
+    try {
+      await updateChecker.downloadUpdate()
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  ipcMain.handle('install-update', () => {
+    if (!updateChecker) {
+      return { success: false, error: 'Update checker not initialized' }
+    }
+    try {
+      updateChecker.installUpdate()
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
   console.log('[Main] IPC handlers registered')
 }
 
@@ -183,6 +278,7 @@ app.whenReady().then(() => {
   chatRouter = new ChatRouter(20)
   registerIpcHandlers()
   mainWindow = createMainWindow()
+  setupUpdateChecker()
   chatGPTWindow = createChatGPTWindow()
   geminiWindow = createGeminiWindow()
   app.on('activate', () => {
@@ -193,4 +289,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('web-contents-created', (_, contents) => { contents.on('new-window', (event) => event.preventDefault()) })
+app.on('web-contents-created', (_, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+})
