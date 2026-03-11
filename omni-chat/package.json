@@ -1,0 +1,93 @@
+{
+  "name": "omni-chat",
+  "version": "1.0.0",
+  "description": "Omni-GroupChat - 人类、ChatGPT、Gemini 三方群聊桌面应用",
+  "main": "./dist/main/index.cjs",
+  "author": "Omni-Chat Team",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:electron && npm run dev:all",
+    "dev:all": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "build": "npm run build:vite && npm run build:electron",
+    "build:vite": "vite build",
+    "build:electron": "electron-vite build",
+    "preview": "npm run build && electron .",
+    "clean": "rm -rf dist release",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:win:portable": "npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.0.0",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.omnichat.app",
+    "productName": "Omni-GroupChat",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "dist/preload/**/*",
+      "dist/renderer/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "forceCodeSigning": false,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Omni-GroupChat",
+      "include": "build/installer.nsh"
+    },
+    "portable": {
+      "artifactName": "Omni-GroupChat-Portable-${version}.exe"
+    }
+  },
+  "buildDependenciesFromSource": false,
+  "npmRebuild": false
+}
